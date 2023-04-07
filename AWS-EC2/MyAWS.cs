@@ -3,6 +3,8 @@ using Amazon.EC2.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -17,17 +19,46 @@ namespace AWS_EC2
             eC2Client = new AmazonEC2Client();
         }
 
-        public async Task<DescribeSecurityGroupsResponse> DescribeSecurityGroups(AmazonEC2Client ec2Client)
+        #region SecurityGroup
+        public async Task<DescribeSecurityGroupsResponse> DescribeSecurityGroups()
         {
             var request = new DescribeSecurityGroupsRequest
             {
                 MaxResults = 10,
             };
 
-            var response = await ec2Client.DescribeSecurityGroupsAsync(request);
+            var response = await eC2Client.DescribeSecurityGroupsAsync(request);
 
             return response;
         }
+
+        public async Task<string> CreateSecurityGroup(string groupName, string groupDescription)
+        {
+            var response = await eC2Client.CreateSecurityGroupAsync(
+                new CreateSecurityGroupRequest(groupName, groupDescription));
+
+            return response.GroupId;
+        }
+
+        public async Task<bool> AuthorizeSecurityGroupIngress(string groupName)
+        {
+            // Get the IP address for the local computer.
+            var ipAddress = await GetIpAddress();
+            Console.WriteLine($"Your IP address is: {ipAddress}");
+            var ipRanges = new List<IpRange> { new IpRange { CidrIp = $"{ipAddress}/32" } };
+            var permission = new IpPermission
+            {
+                Ipv4Ranges = ipRanges,
+                IpProtocol = "tcp",
+                FromPort = 22,
+                ToPort = 22
+            };
+            var permissions = new List<IpPermission> { permission };
+            var response = await eC2Client.AuthorizeSecurityGroupIngressAsync(
+                new AuthorizeSecurityGroupIngressRequest(groupName, permissions));
+            return response.HttpStatusCode == HttpStatusCode.OK;
+        }
+        #endregion
 
         public async Task<List<Instance>> DescribeInstances()
         {
@@ -94,5 +125,28 @@ namespace AWS_EC2
                 });
             }
         }
+
+        public async Task<List<InstanceStateChange>> TerminateInstances(string ec2InstanceId)
+        {
+            var request = new TerminateInstancesRequest
+            {
+                InstanceIds = new List<string> { ec2InstanceId }
+            };
+
+            var response = await eC2Client.TerminateInstancesAsync(request);
+            return response.TerminatingInstances;
+        }
+
+        private static async Task<string> GetIpAddress()
+        {
+            var httpClient = new HttpClient();
+            var ipString = await httpClient.GetStringAsync("https://checkip.amazonaws.com");
+
+            // The IP address is returned with a new line
+            // character on the end. Trim off the whitespace and
+            // return the value to the caller.
+            return ipString.Trim();
+        }
+
     }
 }
